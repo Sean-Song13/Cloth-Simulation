@@ -3,8 +3,10 @@ using System.Collections;
 
 public class PBD_model: MonoBehaviour {
 
+	public int size = 21;
 	float 		t= 0.0333f;
 	float		damping= 0.99f;
+	private float gravity = 9.8f;
 	int[] 		E;
 	float[] 	L;
 	Vector3[] 	V;
@@ -16,7 +18,7 @@ public class PBD_model: MonoBehaviour {
 		Mesh mesh = GetComponent<MeshFilter> ().mesh;
 
 		//Resize the mesh.
-		int n=21;
+		int n=size;
 		Vector3[] X  	= new Vector3[n*n];
 		Vector2[] UV 	= new Vector2[n*n];
 		int[] T	= new int[(n-1)*(n-1)*6];
@@ -133,6 +135,32 @@ public class PBD_model: MonoBehaviour {
 
 		//Apply PBD here.
 		//...
+		Vector3[] P = new Vector3[vertices.Length];
+		int[] count = new int[vertices.Length];
+		for (int i = 0; i < vertices.Length; i++)
+		{
+			P[i] = Vector3.zero;
+			count[i] = 0;
+		}
+
+		for (int i = 0; i < E.Length; i += 2)
+		{
+			int idx_i = E[i + 0];
+			int idx_j = E[i + 1];
+			var vertex_i = vertices[idx_i];
+			var vertex_j = vertices[idx_j];
+			P[idx_i] +=  .5f * (vertex_i + vertex_j + L[i / 2] * (vertex_i - vertex_j).normalized);
+			P[idx_j] +=  .5f * (vertex_i + vertex_j - L[i / 2] * (vertex_i - vertex_j).normalized);
+			count[idx_i] += 1;
+			count[idx_j] += 1;
+		}
+
+		for (int i = 0; i < vertices.Length; i++)
+		{
+			if(i==0 || i == size - 1)	continue;
+			V[i] += 1.0f / t * ((0.2f * vertices[i] + P[i]) / (0.2f + count[i]) - vertices[i]);
+			vertices[i] = (0.2f * vertices[i] + P[i]) / (0.2f + count[i]);
+		}
 		mesh.vertices = vertices;
 	}
 
@@ -142,8 +170,49 @@ public class PBD_model: MonoBehaviour {
 		Vector3[] X = mesh.vertices;
 		
 		//For every vertex, detect collision and apply impulse if needed.
-		//...
+		var sphere = GameObject.Find("Sphere");
+		var center = sphere.transform.position;
+		float radius = 2.7f;
+		for (int i = 0; i < X.Length; i++)
+		{
+			if(i==0 || i == size - 1)	continue;
+			if (Vector3.SqrMagnitude(X[i] - center) < 2.7 * 2.7)
+			{
+				V[i] = V[i] + 1 / t * (center + radius * (X[i] - center).normalized - X[i]);
+				X[i] = center + radius * (X[i] - center).normalized;
+			}
+		}
 		mesh.vertices = X;
+	}
+
+	void Constrain_Position()
+	{
+		Mesh mesh = GetComponent<MeshFilter> ().mesh;
+		Vector3[] vertices = mesh.vertices;
+		
+		for (int i = 0; i < E.Length; i += 2)
+		{
+			int idx_i = E[i + 0];
+			int idx_j = E[i + 1];
+			var vertex_i = vertices[idx_i];
+			var vertex_j = vertices[idx_j];
+			float edgeLength = Vector3.Magnitude(vertex_i - vertex_j);
+			float overLength = edgeLength - 1.1f * L[i / 2];
+			if (overLength > 0)
+			{
+				if((idx_i==0 || idx_i == size-1)&& idx_j!=0  && idx_j!=size-1)
+					vertices[idx_j] += overLength * (vertex_i - vertex_j).normalized;
+				if(idx_i!=0 && idx_i!=size-1 &&( idx_j==0 ||idx_j==size-1))
+					vertices[idx_i] -= overLength * (vertex_i - vertex_j).normalized;
+				if(idx_i!=0 && idx_i!=size-1 && idx_j!=0  && idx_j!=size-1)
+				{
+					vertices[idx_i] -= 0.5f * overLength * (vertex_i - vertex_j).normalized;
+					vertices[idx_j] += 0.5f * overLength * (vertex_i - vertex_j).normalized;
+				}
+			}
+		}
+		
+		mesh.vertices = vertices;
 	}
 
 	// Update is called once per frame
@@ -154,9 +223,10 @@ public class PBD_model: MonoBehaviour {
 
 		for(int i=0; i<X.Length; i++)
 		{
-			if(i==0 || i==20)	continue;
+			if(i==0 || i == size - 1)	continue;
 			//Initial Setup
-			//...
+			V[i] = damping * V[i] + gravity * Vector3.down * t;
+			X[i] = X[i] + t * V[i];
 		}
 		mesh.vertices = X;
 
@@ -164,6 +234,8 @@ public class PBD_model: MonoBehaviour {
 			Strain_Limiting ();
 
 		Collision_Handling ();
+
+		Constrain_Position();
 
 		mesh.RecalculateNormals ();
 
